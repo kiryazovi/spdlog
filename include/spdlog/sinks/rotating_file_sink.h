@@ -35,8 +35,21 @@ public:
         : base_filename_(std::move(base_filename))
         , max_size_(max_size)
         , max_files_(max_files)
+        , rotate_callback_(nullptr)
     {
         file_helper_.open(calc_filename(base_filename_, 0));
+        current_size_ = file_helper_.size(); // expensive. called only once
+    }
+
+    rotating_file_sink(filename_t base_filename, std::size_t max_size, std::size_t max_files,
+                       std::function<bool(filename_t, std::size_t, std::size_t, size_t)>& rotate_callback)
+        : base_filename_(std::move(base_filename))
+        , max_size_(max_size)
+        , max_files_(max_files)
+        , rotate_callback_(std::move(rotate_callback))
+    {
+        bool truncate = rotate_callback_(base_filename_, max_size_, max_files_, 0);
+        file_helper_.open(calc_filename(base_filename_, 0), truncate);
         current_size_ = file_helper_.size(); // expensive. called only once
     }
 
@@ -66,7 +79,13 @@ protected:
         current_size_ += formatted.size();
         if (current_size_ > max_size_)
         {
-            rotate_();
+            if (rotate_callback_) {
+               file_helper_.close();
+               bool truncate = rotate_callback_(base_filename_, max_size_, max_files_, current_size_);
+               file_helper_.reopen(truncate);
+            } else {
+               rotate_();
+            }
             current_size_ = formatted.size();
         }
         file_helper_.write(formatted);
@@ -128,6 +147,7 @@ private:
     std::size_t max_files_;
     std::size_t current_size_;
     details::file_helper file_helper_;
+    std::function<bool(filename_t, std::size_t, std::size_t, size_t)> rotate_callback_;
 };
 
 using rotating_file_sink_mt = rotating_file_sink<std::mutex>;
